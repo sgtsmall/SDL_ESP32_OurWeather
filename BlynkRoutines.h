@@ -519,7 +519,8 @@ void myBTimerEvent()
 
 
 
-        dtostrf(5.0, 5, 2, floatString);
+
+        dtostrf(WXLoadVoltage, 5, 2, floatString);
         Blynk.virtualWrite(V84,  atof(floatString));
         Blynk.virtualWrite(V54, String(floatString)  + "V");
 

@@ -1,14 +1,15 @@
 // Filename WeatherPlus.ino
 // Version 059 June 2020
 // SwitchDoc Labs, LLC
-//
+// Version 0591 localised by VK2PSF
+// uses old method for wxlink via Arduino, xtra fields
 
 //
 //
 
 
 
-#define WEATHERPLUSESP32VERSION "059"
+#define WEATHERPLUSESP32VERSION "0591"
 
 #define CONTROLLERBOARD "V2"
 
@@ -27,7 +28,7 @@
 
 
 
-#define DEFAULTCLOCKTIMEOFFSETTOUTC -21600
+#define DEFAULTCLOCKTIMEOFFSETTOUTC 36000
 
 #undef DEBUGBLYNK
 
@@ -358,6 +359,9 @@ bool BMP280Found;
 int EnglishOrMetric;   // 0 = English units, 1 = Metric
 
 int WeatherDisplayMode;
+
+int SunAirPlusWXtoBlynk; // 0=Off, 1 = Enable
+// DS3231 Library functions
 
 
 
@@ -802,6 +806,7 @@ void MQTTreconnect() {
 // SunAirPlus
 
 bool SunAirPlus_Present;
+//test210105 bool SunAirPlusWX_Present;
 
 float BatteryVoltage;
 float BatteryCurrent;
@@ -823,15 +828,21 @@ bool WXLink_Present;
 
 float WXBatteryVoltage;
 float WXBatteryCurrent;
-
+float WXLoadVoltage;
 float WXLoadCurrent;
 float WXSolarPanelVoltage;
 float WXSolarPanelCurrent;
 long WXMessageID;
+char WXMessageAge[20];
+long WXMessageStamp;
+long HoldMessageStamp;
 bool WXLastMessageGood;
+long WXVisLevel;
+long WXIRLevel;
+long WXUVLevel;
 
-
-#include "WXLink.h"
+//#include "WXLink.h"
+#include "WXLinkI2C.h"
 
 
 
@@ -1203,6 +1214,59 @@ void readSensors()
 
   }
 
+//test210105    if (SunAirPlusWX_Present)
+//test210105      Serial.println("SunAirPlusWX");
+//test210105    else
+//test210105      Serial.println("SunAirPlusWX NP");
+      
+//test210105    //#1 Serial.println("---------------");
+
+//test210105    // if SunAirPlusWX present, read charge data
+
+//test210105    if (SunAirPlusWX_Present)
+//test210105    {
+
+//test210105      LoadVoltage = WXLoadVoltage;
+//test210105      LoadCurrent = WXLoadCurrent;
+
+
+//test210105      BatteryVoltage = WXBatteryVoltage;
+//test210105      BatteryCurrent = WXBatteryCurrent;
+
+//test210105      SolarPanelVoltage = WXSolarPanelVoltage;
+//test210105      SolarPanelCurrent = -WXSolarPanelCurrent;
+
+//test210105#ifdef DEBUGPRINT
+      //#1 Serial.println("");
+      //#1 Serial.print("LIPO_Battery Load Voltage:  "); Serial.print(BatteryVoltage); Serial.println(" V");
+      //#1 Serial.print("LIPO_Battery Current:       "); Serial.print(BatteryCurrent); Serial.println(" mA");
+//test210105      //#1 Serial.println("");
+
+//test210105      //#1 Serial.print("Solar Panel Voltage:   "); Serial.print(SolarPanelVoltage); Serial.println(" V");
+//test210105      //#1 Serial.print("Solar Panel Current:   "); Serial.print(SolarPanelCurrent); Serial.println(" mA");
+//test210105      //#1 Serial.println("");
+
+//test210105      Serial.print("Load Voltage:   "); Serial.print(LoadVoltage); Serial.println(" V");
+//test210105      //#1 Serial.print("Load Current:   "); Serial.print(LoadCurrent); Serial.println(" mA");
+//test210105      //#1 Serial.println("");
+//test210105#endif
+
+//test210105    }
+//test210105    else
+//test210105    {
+
+//test210105      LoadVoltage = 0.0;
+//test210105      LoadCurrent = 0.0;
+
+
+//test210105      BatteryVoltage = 0.0;
+//test210105      BatteryCurrent = 0.0;
+
+//test210105      SolarPanelVoltage = 0.0;
+//test210105      SolarPanelCurrent = 0.0;
+//test210105
+//test210105
+//test210105    }
 
 
 
@@ -1285,7 +1349,15 @@ void readSensors()
         WXSolarPanelVoltage = convert4BytesToFloat(buffer, 45);
         WXSolarPanelCurrent = convert4BytesToFloat(buffer, 49);
 
+// Take LoadVoltage from Aux
+        WXLoadVoltage = convert4BytesToFloat(buffer, 53);
+
+
         WXMessageID = convert4BytesToLong(buffer, 57);
+// Get Si1145
+        WXVisLevel = convert4BytesToLong(buffer, 61);
+        WXIRLevel = convert4BytesToLong(buffer, 65);
+        WXUVLevel = convert4BytesToLong(buffer, 69);
 
         /*   Serial.println("");
            Serial.print("WXLIPO_Battery Load Voltage:  "); Serial.print(WXBatteryVoltage); Serial.println(" V");
@@ -2370,11 +2442,13 @@ void setup() {
 
   WXLink_Present = false;
 
-  WXLink_Present = scanSerialForWXLink();
+  //WXLink_Present = scanSerialForWXLink();
+  WXLink_Present = scanAddressForI2CBus(0x08);
 
   WXLastMessageGood = false;
 
   WXMessageID = 0;
+  WXLoadVoltage = 0.0;
   WXLoadCurrent = 0.0;
 
 
@@ -2383,6 +2457,10 @@ void setup() {
 
   WXSolarPanelVoltage = 0.0;
   WXSolarPanelCurrent = 0.0;
+  
+  WXVisLevel = 0;
+  WXIRLevel = 0;
+  WXUVLevel = 0;
   lastMessageID = -1;
 
   if (WXLink_Present == false)
@@ -2650,8 +2728,17 @@ void setup() {
     }
     else
     {
-      writeToBlynkStatusTerminal("SunAirPlus Not Present");
+      writeToBlynkStatusTerminal("SunAirPlus NP");
     }
+//test210105    if (SunAirPlusWX_Present)
+//test210105    {
+//test210105      writeToBlynkStatusTerminal("SunAirPlusWX Present");
+
+//test210105    }
+//test210105    else
+//test210105    {
+//test210105      writeToBlynkStatusTerminal("SunAirPlusWX NP");
+//test210105    }
 
     if (WXLink_Present)
     {
@@ -2660,7 +2747,7 @@ void setup() {
     }
     else
     {
-      writeToBlynkStatusTerminal("WXLink Not Present");
+      writeToBlynkStatusTerminal("WXLink NP");
     }
 
     if (SolarMAXLA == 1)
@@ -2690,7 +2777,7 @@ void setup() {
     }
     else
     {
-      writeToBlynkStatusTerminal("Air Quality Sensor Not Present");
+      writeToBlynkStatusTerminal("Air Quality Sensor NP");
     }
 
     if (BMP280Found)
@@ -2700,7 +2787,7 @@ void setup() {
     }
     else
     {
-      writeToBlynkStatusTerminal("BMP280 Not Present");
+      writeToBlynkStatusTerminal("BMP280 NP");
     }
 
 
@@ -2711,7 +2798,7 @@ void setup() {
     }
     else
     {
-      writeToBlynkStatusTerminal("TSL2591 Not Present");
+      writeToBlynkStatusTerminal("TSL2591 NP");
     }
 
     if (SHT30_Present)
@@ -2732,7 +2819,7 @@ void setup() {
     }
     else
     {
-      writeToBlynkStatusTerminal("AS3935 ThunderBoard Not Present");
+      writeToBlynkStatusTerminal("AS3935 ThunderBoard NP");
     }
 
     if (HDC1080_Present)
@@ -2742,7 +2829,7 @@ void setup() {
     }
     else
     {
-      writeToBlynkStatusTerminal("HDC1080 Not Present");
+      writeToBlynkStatusTerminal("HDC1080 NP");
     }
 
 
